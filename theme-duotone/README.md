@@ -9,10 +9,26 @@ through a two-stop gradient: the darkest tone becomes the shadow colour, the
 lightest the highlight colour. On the stock Omarchy logo — which is only black
 and one grey — that produces literally two colours in the output PNG.
 
+## Source image
+
+![Omarchy wordmark on black](omarchy.png)
+
+`omarchy.png` in this directory is the reference source: the Omarchy wordmark on
+black, 3840×2160, 8-bit grayscale, 9.5 KB. It is what the default `--source`
+points at, so restoring it is the one manual step after a reinstall:
+
+```sh
+cp theme-duotone/omarchy.png ~/Pictures/omarchy.png
+```
+
+Any other image works too — it just has to be in `~/Pictures` (or passed with
+`--source`).
+
 ## Install
 
 ```sh
 ./install.sh                 # -> ~/.local/bin/theme-duotone
+cp omarchy.png ~/Pictures/   # the default source image
 ```
 
 Requires `imagemagick` and `gum`:

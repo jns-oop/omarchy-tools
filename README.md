@@ -48,6 +48,7 @@ same three lines in `bind = SUPER ALT, D, exec, omarchy-launch-tui ...` form.
 
 ```
 theme-duotone/         theme-duotone      install.sh   README.md
+                       omarchy.png        (reference source image)
 cursor-picker/         cursor-picker      install.sh   README.md
 battery-charge-limit/   battery-charge-limit
                       99-battery-charge-limit.rules
