@@ -4,6 +4,12 @@ Toggle a ThinkPad's battery charge threshold between 80% and 100% from a
 single command, with a desktop notification. Built for Omarchy, where it is
 bound to `SUPER + B`.
 
+> **Hardcoded for this ThinkPad.** `BAT0`, the `wheel` group and the 80% limit
+> appear literally in the script, the udev rule and `install.sh`. That is
+> deliberate: this copy exists to reproduce one machine, not to be portable.
+> On a different laptop, change those values first — the battery name under
+> `/sys/class/power_supply` and the group you belong to.
+
 ```sh
 battery-charge-limit          # toggle 80% <-> 100%
 battery-charge-limit on       # stop charging at 80%
