@@ -46,8 +46,8 @@ picker — **Follow theme accent** — removes that pin again.
 
   Any theme on `XCURSOR_PATH` works with the picker, but the
   `manual-lock` pin path and the optional `colors.tsv` swatches are built
-  around Bibata Material. The full control-plane from upstream (theme-set
-  hook, login re-apply, bitmap trimming, swatches) is not part of this repo.
+  around Bibata Material. The control plane — accent matching, the theme-set
+  hook, the login re-apply and bitmap trimming — ships in [`bibata/`](bibata/).
 
 `hyprctl`, `gsettings` and `dbus-update-activation-environment` are used when
 present; without them the picker still persists the choice for next login.
@@ -85,3 +85,17 @@ theme accent), `--dry-run`, `--list`, `--help`.
 If `~/.config/omarchy/bibata-cursor/colors.tsv` exists (tab separated
 `family⇥dark|light⇥#rrggbb`), each Bibata row shows its accent colour as a
 marker. Without the file, rows fall back to a dim marker.
+
+## Accent-matched setup
+
+[`bibata/install.sh`](bibata/) installs the rest of the setup: the Material
+Bibata themes, `pick.py`, the Omarchy theme-set hook that recolours the cursor
+to the theme accent, the login-time re-apply and `boot-check.sh`.
+
+```sh
+./bibata/install.sh              # themes + helpers
+./bibata/install.sh --no-icons   # helpers only
+```
+
+See [`bibata/README.md`](bibata/README.md) for what lands where and how the
+hook, the pin and the `60-cursor` login file interact.

@@ -1,0 +1,45 @@
+Material Bibata Cursor
+======================
+
+Source: https://github.com/SakibShahariar/material-bibata-cursor (v1.5.0 release
+archives, MD5-free SHA-256 pinned in install.sh). Compiled cursor themes are
+derivative of Bibata_Cursor (https://github.com/rtgiskard/bibata_cursor) and are
+licensed GPL-3.0-or-later; the upstream build scripts and themes.json are MIT.
+
+What lives where
+----------------
+~/.local/share/icons/Bibata-Material-*   cursor themes (Xcursor + Hyprcursor),
+                                         Xcursor bitmaps trimmed to 24/48 px,
+                                         SVG tree intentionally omitted.
+~/.config/omarchy/bibata-cursor/         install.sh, pick.py, xcursor_prune.py,
+                                         colors.tsv, boot-check.sh,
+                                         login-apply.sh, this NOTICE.
+~/.config/autostart/bibata-cursor.desktop
+                                         login-time safety net: re-applies the
+                                         cursor once the session is up.
+~/.config/omarchy/hooks/theme-set.d/20-bibata-cursor
+                                         theme-set hook (copy of the script here).
+~/.config/uwsm/env.d/50-bibata-cursor    boot-time XCURSOR_THEME /
+                                         HYPRCURSOR_THEME, rewritten per theme.
+
+Nothing is installed system-wide and no file here is read by Hyprland's config
+parser, so removing it cannot cause a config error.
+
+A theme switch updates Hyprland, GTK apps and DBus-activated apps immediately.
+XCURSOR_THEME for apps started from an already-running shell keeps the value it
+inherited at login, so those pick up the newest cursor after the next login.
+
+Uninstall
+---------
+  rm -rf ~/.local/share/icons/Bibata-Material-*
+  rm -rf ~/.config/omarchy/bibata-cursor
+  rm -f  ~/.config/omarchy/hooks/theme-set.d/20-bibata-cursor
+  rm -f  ~/.config/uwsm/env.d/50-bibata-cursor
+  rm -f  ~/.config/autostart/bibata-cursor.desktop
+  rm -rf ~/.local/state/bibata-cursor
+  gsettings reset org.gnome.desktop.interface cursor-theme
+  hyprctl setcursor default 24
+
+Update
+------
+  ~/.config/omarchy/bibata-cursor/install.sh

@@ -1,0 +1,67 @@
+#!/bin/bash
+# Omarchy theme-set hook: keep the Material Bibata cursor in step with the theme.
+#
+# Install with:
+#   omarchy hook install theme-set ~/.config/omarchy/bibata-cursor/20-bibata-cursor
+#
+# Picks the Bibata family closest to the theme accent in the theme's own dark
+# or light set, applies it live, and records it for the next cold start. It
+# only talks to the running session (hyprctl, gsettings, DBus) and never
+# touches Hyprland config, so it cannot produce a config error or safe mode.
+set -u
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/bibata-cursor"
+ICONS="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
+COLORS="$HOME/.local/state/omarchy/current/theme/colors.toml"
+SIZE="${XCURSOR_SIZE:-24}"
+ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/uwsm/env.d/50-bibata-cursor"
+
+# A manual pick from cursor-picker pins the cursor; leave it alone.
+[[ -f $CONF/manual-lock ]] && exit 0
+
+[[ -f $COLORS && -f $CONF/pick.py ]] || exit 0
+
+mode=$(omarchy-theme-color --file "$COLORS" mode 2>/dev/null) || mode=""
+[[ $mode == light ]] || mode=dark
+accent=$(omarchy-theme-color --file "$COLORS" accent 2>/dev/null) || accent=""
+
+theme=""
+if [[ $accent =~ ^#[0-9A-Fa-f]{6}$ ]]; then
+  theme=$(python3 "$CONF/pick.py" --mode "$mode" --accent "$accent" 2>/dev/null) || theme=""
+fi
+
+# Never point the session at a theme that is not installed.
+[[ -n $theme && -d $ICONS/$theme ]] || theme="Bibata-Material-Grey"
+[[ -d $ICONS/$theme ]] || theme="Bibata-Material-Grey-Light"
+[[ -d $ICONS/$theme ]] || exit 0
+
+# GTK apps do not use server-side cursors; they read this.
+if command -v gsettings >/dev/null 2>&1; then
+  gsettings set org.gnome.desktop.interface cursor-theme "$theme" >/dev/null 2>&1
+fi
+
+# Hyprland: apply to the running compositor. Hyprland 0.56 has no `setenv`
+# command (it answers "unknown request"), so newly launched clients pick the
+# theme name up from the uwsm env file below at the next login instead.
+if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && command -v hyprctl >/dev/null 2>&1; then
+  hyprctl setcursor "$theme" "$SIZE" >/dev/null 2>&1
+fi
+
+# Portals and DBus-activated apps.
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+  dbus-update-activation-environment --systemd XCURSOR_THEME HYPRCURSOR_THEME >/dev/null 2>&1
+fi
+
+# Cold start. uwsm sources ~/.config/uwsm/env.d/* before Hyprland starts, and
+# Omarchy's startup-cursor.lua reads HYPRCURSOR_THEME / XCURSOR_THEME from there.
+if ! grep -qx "export XCURSOR_THEME=$theme" "$ENV_FILE" 2>/dev/null; then
+  mkdir -p "$(dirname "$ENV_FILE")"
+  tmp="$ENV_FILE.tmp.$$"
+  {
+    echo "# Written by the Omarchy theme-set hook (bibata-cursor); last applied theme."
+    echo "export XCURSOR_THEME=$theme"
+    echo "export HYPRCURSOR_THEME=$theme"
+  } >"$tmp" && mv "$tmp" "$ENV_FILE"
+fi
+
+exit 0

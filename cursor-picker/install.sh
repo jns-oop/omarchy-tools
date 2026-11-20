@@ -52,3 +52,11 @@ EOF
 if [[ ! -f ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/bibata-cursor/colors.tsv ]]; then
   printf '\nnote: no colors.tsv found, so rows show a plain marker instead of a colour swatch.\n' >&2
 fi
+
+icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
+if ! compgen -G "$icons/Bibata-Material-*" >/dev/null; then
+  printf '\nnote: no Bibata-Material themes in %s.\n' "$icons" >&2
+  printf '      cursor-picker lists any installed theme, but the accent-matched setup\n' >&2
+  printf '      (swatches, theme-set hook, login re-apply) is the Bibata one:\n' >&2
+  printf '        %s\n' "$here/bibata/install.sh" >&2
+fi
