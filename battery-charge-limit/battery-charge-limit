@@ -1,22 +1,42 @@
 #!/usr/bin/env bash
 
-# Keep the ThinkPad battery at 80% and toggle the limit on demand.
+# Limit a laptop battery's charge threshold and toggle the limit on demand.
 #
-#   battery-charge-limit          toggle between 80% and 100%
-#   battery-charge-limit on       stop charging at 80%
+#   battery-charge-limit          toggle between the limit and 100%
+#   battery-charge-limit on       stop charging at the limit
 #   battery-charge-limit off      charge to 100%
 #   battery-charge-limit status   print the current limit
 #
+# The battery is detected by its charge_control_end_threshold attribute, so
+# BAT0, BAT1, CMB0 and friends all work; set BATTERY=/sys/class/power_supply/...
+# to pick one explicitly. CHARGE_LIMIT overrides the 80% default.
+#
 # Writing the limit needs root. The udev rule in
-# /etc/udev/rules.d/99-battery-charge-limit.rules grants group wheel write
+# /etc/udev/rules.d/99-battery-charge-limit.rules grants an admin group write
 # access, so the toggle needs no password; pkexec is only a fallback.
 
 set -euo pipefail
 
-BAT=/sys/class/power_supply/BAT0
-ATTR="$BAT/charge_control_end_threshold"
-LIMIT=80
+LIMIT="${CHARGE_LIMIT:-80}"
 FULL=100
+
+detect_battery() {
+  local dir
+  for dir in /sys/class/power_supply/*; do
+    [[ -e $dir/charge_control_end_threshold ]] || continue
+    printf '%s\n' "$dir"
+    return 0
+  done
+  return 1
+}
+
+BAT="${BATTERY:-$(detect_battery || true)}"
+BAT="${BAT%/}"
+if [[ -z $BAT ]]; then
+  echo "No battery with charge_control_end_threshold found under /sys/class/power_supply" >&2
+  exit 1
+fi
+ATTR="$BAT/charge_control_end_threshold"
 
 if [[ ! -e $ATTR ]]; then
   echo "No charge threshold control at $ATTR" >&2
@@ -24,22 +44,29 @@ if [[ ! -e $ATTR ]]; then
 fi
 
 if [[ ! -w $ATTR ]] && (( EUID != 0 )); then
-  exec pkexec --user root "$0" "$@"
+  # pkexec starts with a clean environment, so the battery and limit have to be
+  # passed explicitly or an override would be silently dropped.
+  if command -v pkexec >/dev/null 2>&1; then
+    exec pkexec --user root env BATTERY="$BAT" CHARGE_LIMIT="$LIMIT" \
+      "$(readlink -f -- "$0")" "$@"
+  fi
+  echo "Need root to write $ATTR (install the udev rule, or run with sudo)" >&2
+  exit 1
 fi
 
 current=$(cat "$ATTR")
 
 notify() {
-  omarchy-notification-send -g 󰂑 -u low -t 3000 "Ladegrenze" "$1" >/dev/null 2>&1 || true
+  omarchy-notification-send -g 󰂑 -u low -t 3000 "Battery" "$1" >/dev/null 2>&1 || true
 }
 
 set_limit() {
   printf '%s\n' "$1" >"$ATTR"
 
   if (( $1 >= FULL )); then
-    notify "Lädt wieder bis 100%"
+    notify "Charging to 100%"
   else
-    notify "Ladung begrenzt auf $1%"
+    notify "Charging limited to $1%"
   fi
 }
 
@@ -54,8 +81,8 @@ case "${1:-toggle}" in
   on) set_limit "$LIMIT" ;;
   off) set_limit "$FULL" ;;
   status)
-    printf 'limit: %s%%  capacity: %s%%  %s\n' \
-      "$current" "$(cat "$BAT/capacity")" "$(cat "$BAT/status")"
+    printf '%s: limit %s%%  capacity %s%%  %s\n' \
+      "${BAT##*/}" "$current" "$(cat "$BAT/capacity")" "$(cat "$BAT/status")"
     ;;
   *)
     echo "Usage: battery-charge-limit [toggle|on|off|status]" >&2

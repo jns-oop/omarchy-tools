@@ -30,10 +30,17 @@ if [[ $accent =~ ^#[0-9A-Fa-f]{6}$ ]]; then
   theme=$(python3 "$CONF/pick.py" --mode "$mode" --accent "$accent" 2>/dev/null) || theme=""
 fi
 
-# Never point the session at a theme that is not installed.
-[[ -n $theme && -d $ICONS/$theme ]] || theme="Bibata-Material-Grey"
-[[ -d $ICONS/$theme ]] || theme="Bibata-Material-Grey-Light"
-[[ -d $ICONS/$theme ]] || exit 0
+# Never point the session at a theme that is not installed: fall back to any
+# installed family rather than a hardcoded one.
+if [[ -z $theme || ! -d $ICONS/$theme ]]; then
+  theme=""
+  for candidate in "$ICONS"/Bibata-Material-*; do
+    [[ -d $candidate ]] || continue
+    theme="${candidate##*/}"
+    break
+  done
+fi
+[[ -n $theme ]] || exit 0
 
 # GTK apps do not use server-side cursors; they read this.
 if command -v gsettings >/dev/null 2>&1; then

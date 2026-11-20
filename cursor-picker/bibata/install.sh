@@ -55,13 +55,6 @@ while (( $# )); do
   esac
 done
 
-# All 28 accent families from upstream themes.json (Classic excluded, see above).
-FAMILIES=(
-  Ice-Blue Sky-Blue Deep-Blue Soft-Blue Teal Mint Seafoam
-  Sage Lime Moss Peach Apricot Sunset Blush Salmon Pink-Pastel Pink-Rose
-  Lilac Violet Sand Beige Brown Cloud Grey Slate Noir Midnight Charcoal
-)
-
 mkdir -p "$ICONS" "$CONF"
 
 if (( no_icons )); then
@@ -86,28 +79,35 @@ else
   printf '%s  %s\n' "$DARK_SHA" "$WORK/dark.tar.gz" | sha256sum -c --quiet -
   printf '%s  %s\n' "$LIGHT_SHA" "$WORK/light.tar.gz" | sha256sum -c --quiet -
 
-  echo "==> Building the accent table from upstream themes.json"
+  # The family list comes from upstream themes.json, so a release that adds or
+  # renames families needs no edit here. Classic is the one family left out: it
+  # is not an accent colour and has no light variant.
+  mapfile -t FAMILIES < <(jq -r 'keys[]' "$WORK/themes.json" |
+    sed 's/-Light$//' | grep -vx Classic | sort -u)
+
+  echo "==> Building the accent table from ${#FAMILIES[@]} upstream families"
   : >"$WORK/colors.tsv"
   for family in "${FAMILIES[@]}"; do
     for pair in "dark:$family" "light:${family}-Light"; do
       mode=${pair%%:*}
       key=${pair#*:}
+      # A family without a light variant simply has no light row.
       hex=$(jq -r --arg key "$key" '.[$key].primary // empty' "$WORK/themes.json")
-      [[ -n $hex ]] || { echo "themes.json has no entry for $key" >&2; exit 1; }
+      [[ -n $hex ]] || continue
       printf '%s\t%s\t%s\n' "$family" "$mode" "$hex" >>"$WORK/colors.tsv"
     done
   done
   install -m 644 "$WORK/colors.tsv" "$CONF/colors.tsv"
 
-  echo "==> Extracting ${#FAMILIES[@]} families (dark and light)"
-  dark_members=()
-  light_members=()
-  for family in "${FAMILIES[@]}"; do
-    dark_members+=("bibata-material-dark-v${VERSION}/Bibata-Material-${family}")
-    light_members+=("bibata-material-light-v${VERSION}/Bibata-Material-${family}-Light")
-  done
-  tar xzf "$WORK/dark.tar.gz" -C "$WORK/stage" --strip-components=1 "${dark_members[@]}"
-  tar xzf "$WORK/light.tar.gz" -C "$WORK/stage" --strip-components=1 "${light_members[@]}"
+  echo "==> Extracting the accent families (dark and light)"
+  # Wildcards instead of a member list, so a release that adds or renames a
+  # family still works. Classic is excluded, and the light archive only holds
+  # the *-Light variants.
+  tar xzf "$WORK/dark.tar.gz" -C "$WORK/stage" --strip-components=1 \
+    --wildcards '*/Bibata-Material-*' \
+    --exclude='bibata-material-dark-v*/Bibata-Material-Classic*'
+  tar xzf "$WORK/light.tar.gz" -C "$WORK/stage" --strip-components=1 \
+    --wildcards '*/Bibata-Material-*-Light'
 
   echo "==> Trimming Xcursor bitmaps to ${SIZES} px"
   for directory in "$WORK"/stage/Bibata-Material-*; do

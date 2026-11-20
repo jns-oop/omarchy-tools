@@ -23,31 +23,23 @@ picker — **Follow theme accent** — removes that pin again.
   sudo pacman -S --needed fzf
   ```
 
-- A cursor theme to pick from. This setup uses
-  [bibata-material-cursors](https://github.com/SakibShahariar/material-bibata-cursor)
-  — the `Bibata-Material-*` families (dark and light) built from
+- A cursor theme to pick from. **Any** theme on `XCURSOR_PATH` works — the
+  picker only reads directories that contain `cursors/` or a Hyprcursor
+  `manifest.hl`.
+
+  This setup is built around
+  [Material Bibata](https://github.com/SakibShahariar/material-bibata-cursor) —
+  the `Bibata-Material-*` families (dark and light) built from
   [Bibata_Cursor](https://github.com/ful1e5/Bibata_Cursor) — installed **per
-  user** from its GitHub releases. They go to `~/.local/share/icons`, not
-  `/usr/share/icons`: libhyprcursor only scans the user icon dir, and
-  `XCURSOR_PATH` already covers it.
+  user** into `~/.local/share/icons`: libhyprcursor only scans the user icon
+  dir, and `XCURSOR_PATH` already covers it.
 
   ```sh
-  cd /tmp
-  v=1.5.0
-  base=https://github.com/SakibShahariar/material-bibata-cursor/releases/download/v$v
-  curl -LO "$base/bibata-material-dark-v$v.tar.gz"
-  curl -LO "$base/bibata-material-light-v$v.tar.gz"
-  tar xzf "bibata-material-dark-v$v.tar.gz"
-  tar xzf "bibata-material-light-v$v.tar.gz"
-  mkdir -p ~/.local/share/icons
-  mv "bibata-material-dark-v$v"/Bibata-Material-* ~/.local/share/icons/
-  mv "bibata-material-light-v$v"/Bibata-Material-* ~/.local/share/icons/
+  ./bibata/install.sh        # themes, helpers and the accent matching
   ```
 
-  Any theme on `XCURSOR_PATH` works with the picker, but the
-  `manual-lock` pin path and the optional `colors.tsv` swatches are built
-  around Bibata Material. The control plane — accent matching, the theme-set
-  hook, the login re-apply and bitmap trimming — ships in [`bibata/`](bibata/).
+  The `manual-lock` pin, the `colors.tsv` swatches and the theme-set hook assume
+  that setup; without it the picker still lists, applies and persists any theme.
 
 `hyprctl`, `gsettings` and `dbus-update-activation-environment` are used when
 present; without them the picker still persists the choice for next login.
