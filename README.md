@@ -6,6 +6,15 @@ set up the same way in a few commands. Nothing here is tied to a particular
 hostname, username, battery or theme: paths come from `XDG_*`/`$HOME` and the
 hardware parts are detected at install time.
 
+## Personal use, no support
+
+These are scripts I wrote for my own machines and publish only so I can put them
+back after a reinstall. They are not a product: there is no support, no roadmap
+and no promise that they keep working across Omarchy updates. Read them before
+running them — they touch your dotfiles, your icon themes and, for the battery
+tool, a udev rule under `/etc`. Fork and adapt freely; issues and pull requests
+may go unanswered.
+
 | Tool | What it does |
 | --- | --- |
 | [theme-duotone](theme-duotone/) | Recolours `~/Pictures/omarchy.png` in two colours from the current theme and drops it in that theme's background folder. |
