@@ -1,0 +1,410 @@
+#!/bin/bash
+# Cursor theme picker for Omarchy.
+#
+# Lists every installed Xcursor/Hyprcursor theme, applies the focused one to the
+# running session while you browse, and persists the confirmed pick for the next
+# login. Picking a theme pins it, so the Bibata theme-set hook stops replacing it
+# on theme switches; the "Follow theme accent" row removes that pin again.
+#
+# Keys in the picker:
+#   enter   apply and pin the focused theme
+#   esc     cancel and restore what was applied when the picker opened
+#   ctrl-s  cycle cursor size (24 -> 32 -> 48)
+
+set -uo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/cursor-picker"
+ENV_FILE="$CONFIG_HOME/uwsm/env.d/60-cursor"
+PIN_FILE="$CONFIG_HOME/omarchy/bibata-cursor/manual-lock"
+SWATCH_FILE="$CONFIG_HOME/omarchy/bibata-cursor/colors.tsv"
+THEME_HOOK="$CONFIG_HOME/omarchy/hooks/theme-set.d/20-bibata-cursor"
+DEFAULT_PATH="$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/usr/share/pixmaps"
+
+DRY_RUN=0
+NO_PIN=0
+
+declare -A THEME_PATH=()
+declare -a THEME_KEYS=()
+
+usage() {
+  cat <<'EOF'
+Usage: cursor-picker [--theme NAME [--size N] [--no-pin] [--dry-run]]
+       cursor-picker --list
+       cursor-picker --help
+
+  --list        Print every detected cursor theme and exit
+  --theme NAME  Apply a theme without the picker (persists unless --dry-run)
+  --size N      Cursor size in px
+  --no-pin      Remember the choice but leave the theme accent hook in charge
+  --dry-run     Print what would be applied, change nothing
+EOF
+}
+
+# --- discovery ---------------------------------------------------------------
+
+discover() {
+  THEME_PATH=()
+  THEME_KEYS=()
+
+  local root dir key
+  local path="${XCURSOR_PATH:-$DEFAULT_PATH}"
+  local IFS=:
+
+  for root in $path; do
+    root="${root/#\~/$HOME}"
+    [[ -d $root ]] || continue
+    for dir in "$root"/*; do
+      [[ -d $dir ]] || continue
+      key="${dir##*/}"
+      [[ -n ${THEME_PATH[$key]:-} ]] && continue
+      if [[ -f $dir/cursors/left_ptr || -f $dir/cursors/default ||
+        (-f $dir/manifest.hl && -d $dir/hyprcursors) ]]; then
+        THEME_PATH[$key]="$dir"
+      fi
+    done
+  done
+
+  (( ${#THEME_PATH[@]} )) || return 0
+  mapfile -t THEME_KEYS < <(printf '%s\n' "${!THEME_PATH[@]}" | sort)
+}
+
+swatch_hex() {
+  local key="$1" family mode hex
+  [[ -f $SWATCH_FILE ]] || return 0
+  mode=dark
+  [[ $key == *-Light ]] && mode=light
+  family="${key#Bibata-Material-}"
+  family="${family%-Light}"
+  hex="$(awk -F'\t' -v f="$family" -v m="$mode" '$1 == f && $2 == m { print $3; exit }' "$SWATCH_FILE")"
+  [[ -n $hex ]] && printf '%s' "$hex"
+}
+
+row_display() {
+  local key="$1" label="$2" badges="$3" hex
+
+  hex="$(swatch_hex "$key")"
+  if [[ -n $hex ]]; then
+    printf '\033[38;2;%d;%d;%dm\342\226\210\342\226\210\033[0m  ' \
+      "$((16#${hex:1:2}))" "$((16#${hex:3:2}))" "$((16#${hex:5:2}))"
+  else
+    printf '\033[2m\342\226\210\342\226\210\033[0m  '
+  fi
+  printf '%-32.32s \033[2m%s\033[0m%s' "$label" "$key" "$badges"
+}
+
+emit_theme_row() {
+  local out="$1" key="$2" current="$3" label badges=""
+
+  label="$(sed -n 's/^Name=//p' "${THEME_PATH[$key]}/index.theme" 2>/dev/null | head -1)"
+  label="${label:-$key}"
+  label="${label#Material Bibata Cursor }"
+  [[ $key == *-Light ]] && badges+=$' \033[2mlight\033[0m'
+  [[ $key == "$current" ]] && badges+=$' \033[38;5;114mcurrent\033[0m'
+  printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$(row_display "$key" "$label" "$badges")" theme "$key" "${THEME_PATH[$key]}" "$label" >>"$out"
+}
+
+build_rows() {
+  local out="$1" current="$2" key
+  local action
+
+  action="$(printf '\033[2m\342\206\272\033[0m  Follow theme accent')"
+  [[ -f $PIN_FILE ]] && action+="$(printf ' \033[2m(pinned)\033[0m')"
+
+  : >"$out"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$action" action @action "" "Follow theme accent" >>"$out"
+
+  # The current theme first, so the opening selection is already applied.
+  [[ -n ${THEME_PATH[$current]:-} ]] && emit_theme_row "$out" "$current" "$current"
+  for key in "${THEME_KEYS[@]}"; do
+    [[ $key == "$current" ]] && continue
+    emit_theme_row "$out" "$key" "$current"
+  done
+}
+
+# --- applying ----------------------------------------------------------------
+
+current_theme() {
+  local theme
+  theme="$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | sed "s/^'//; s/'$//")"
+  [[ -n $theme && $theme != "''" ]] || theme="${XCURSOR_THEME:-}"
+  printf '%s' "$theme"
+}
+
+current_size() {
+  local size
+  size="$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -dc '0-9')"
+  [[ $size =~ ^[0-9]+$ ]] || size="${XCURSOR_SIZE:-24}"
+  printf '%s' "$size"
+}
+
+apply_theme() {
+  local theme="$1" size="$2" scope="${3:-full}" dir hypr_theme=""
+
+  [[ -n $theme ]] || return 0
+  dir="${THEME_PATH[$theme]:-}"
+  [[ -n $dir && -d $dir/hyprcursors ]] && hypr_theme="$theme"
+
+  if [[ $DRY_RUN == 1 ]]; then
+    printf 'would apply %s at %spx (hyprctl setcursor %s %s' "$theme" "$size" "$theme" "$size"
+    [[ -d ${dir:-}/hyprcursors ]] && printf ', hyprcursor capable'
+    [[ $scope == full ]] && printf '; gsettings cursor-theme=%s cursor-size=%s; dbus-update-activation-environment' "$theme" "$size"
+    printf ')\n'
+    return 0
+  fi
+
+  if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && command -v hyprctl >/dev/null 2>&1; then
+    hyprctl setcursor "$theme" "$size" >/dev/null 2>&1 || true
+  fi
+  [[ $scope == full ]] || return 0
+
+  if command -v gsettings >/dev/null 2>&1; then
+    gsettings set org.gnome.desktop.interface cursor-theme "$theme" >/dev/null 2>&1 || true
+    gsettings set org.gnome.desktop.interface cursor-size "$size" >/dev/null 2>&1 || true
+  fi
+
+  if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    if [[ -n $hypr_theme ]]; then
+      XCURSOR_THEME="$theme" XCURSOR_SIZE="$size" HYPRCURSOR_THEME="$hypr_theme" HYPRCURSOR_SIZE="$size" \
+        dbus-update-activation-environment --systemd \
+        XCURSOR_THEME XCURSOR_SIZE HYPRCURSOR_THEME HYPRCURSOR_SIZE >/dev/null 2>&1 || true
+    else
+      XCURSOR_THEME="$theme" XCURSOR_SIZE="$size" HYPRCURSOR_SIZE="$size" \
+        dbus-update-activation-environment --systemd \
+        XCURSOR_THEME XCURSOR_SIZE HYPRCURSOR_SIZE >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+persist_theme() {
+  local theme="$1" size="$2" dir="${THEME_PATH[$1]:-}" tmp
+
+  if [[ $DRY_RUN == 1 ]]; then
+    printf 'would write %s with %s at %spx\n' "$ENV_FILE" "$theme" "$size"
+    return 0
+  fi
+
+  mkdir -p "${ENV_FILE%/*}" || return 1
+  tmp="$ENV_FILE.tmp.$$"
+  {
+    printf '# Written by cursor-picker: a manual cursor choice.\n'
+    printf '# Sorted after 50-bibata-cursor, so it wins at login while pinned.\n'
+    printf 'export XCURSOR_THEME=%s\n' "$theme"
+    printf 'export XCURSOR_SIZE=%s\n' "$size"
+    printf 'export HYPRCURSOR_SIZE=%s\n' "$size"
+    [[ -n $dir && -d $dir/hyprcursors ]] && printf 'export HYPRCURSOR_THEME=%s\n' "$theme"
+  } >"$tmp" && mv -f "$tmp" "$ENV_FILE"
+}
+
+pin_theme() {
+  [[ $NO_PIN == 1 ]] && return 0
+  [[ $DRY_RUN == 1 ]] && {
+    printf 'would pin %s\n' "$1"
+    return 0
+  }
+  mkdir -p "${PIN_FILE%/*}" && printf '%s\n' "$1" >"$PIN_FILE"
+}
+
+follow_theme_accent() {
+  if [[ $DRY_RUN == 1 ]]; then
+    printf 'would remove %s and %s, then run %s\n' "$PIN_FILE" "$ENV_FILE" "$THEME_HOOK"
+    return 0
+  fi
+
+  rm -f "$PIN_FILE" "$ENV_FILE"
+  [[ -f $THEME_HOOK ]] && bash "$THEME_HOOK" >/dev/null 2>&1
+  return 0
+}
+
+notify() {
+  command -v omarchy-notification-send >/dev/null 2>&1 &&
+    omarchy-notification-send "Cursor" "$1" >/dev/null 2>&1
+  return 0
+}
+
+# --- commands ----------------------------------------------------------------
+
+cmd_list() {
+  local key formats current
+  discover
+  current="$(current_theme)"
+
+  (( ${#THEME_KEYS[@]} )) || {
+    echo "No cursor themes found in ${XCURSOR_PATH:-$DEFAULT_PATH}" >&2
+    return 1
+  }
+
+  for key in "${THEME_KEYS[@]}"; do
+    formats=""
+    [[ -d ${THEME_PATH[$key]}/cursors ]] && formats+="xcursor"
+    [[ -f ${THEME_PATH[$key]}/manifest.hl ]] && formats+="${formats:+,}hyprcursor"
+    [[ $key == "$current" ]] && printf '* ' || printf '  '
+    printf '%-38s %-14s %s\n' "$key" "$formats" "${THEME_PATH[$key]}"
+  done
+}
+
+cmd_apply_key() {
+  local key="$1" state="$2" live="$3" last size
+  discover
+  [[ $key == @* || -z $key ]] && return 0
+
+  last="$(cat "$state/last" 2>/dev/null)"
+  [[ $key == "$last" ]] && return 0
+  printf '%s' "$key" >"$state/last"
+  size="$(cat "$state/size" 2>/dev/null)"
+  apply_theme "$key" "${size:-24}" "$live"
+}
+
+cmd_cycle_size() {
+  local key="$1" state="$2" size
+  discover
+  size="$(cat "$state/size" 2>/dev/null)"
+  case "$size" in
+    24) size=32 ;;
+    32) size=48 ;;
+    *) size=24 ;;
+  esac
+  printf '%s' "$size" >"$state/size"
+  [[ $key == @* || -z $key ]] && return 0
+  apply_theme "$key" "$size" live
+}
+
+cmd_set() {
+  local theme="$1" size="${2:-}"
+  discover
+
+  if [[ -z ${THEME_PATH[$theme]:-} ]]; then
+    echo "cursor-picker: no installed cursor theme named '$theme'" >&2
+    return 1
+  fi
+
+  size="${size:-$(current_size)}"
+  apply_theme "$theme" "$size" full
+  persist_theme "$theme" "$size"
+  pin_theme "$theme"
+  notify "$theme · ${size}px"
+}
+
+cmd_run() {
+  local start_theme start_size size session key selection status=0
+  local qself qsession
+
+  discover
+  (( ${#THEME_KEYS[@]} )) || {
+    echo "No cursor themes found in ${XCURSOR_PATH:-$DEFAULT_PATH}" >&2
+    return 1
+  }
+
+  start_theme="$(current_theme)"
+  [[ -n ${THEME_PATH[$start_theme]:-} ]] || start_theme="${THEME_KEYS[0]}"
+  start_size="$(current_size)"
+  size="$start_size"
+
+  session="$(mktemp -d "${TMPDIR:-/tmp}/cursor-picker.XXXXXX")" || return 1
+  trap 'rm -rf "$session"' EXIT
+
+  printf '%s' "$size" >"$session/size"
+  printf '%s' "$start_theme" >"$session/last"
+  build_rows "$session/rows.tsv" "$start_theme"
+
+  qself="$(printf '%q' "$SELF")"
+  qsession="$(printf '%q' "$session")"
+
+  selection="$(
+    fzf --ansi --height=100% --layout=reverse --cycle \
+      --prompt 'Cursor  ' \
+      --header 'enter apply · esc cancel · ctrl-s size · first row: follow theme accent' \
+      --delimiter $'\t' --nth 1 --with-nth 1 \
+      --bind "focus:execute-silent(bash $qself --internal-apply-key {3} --state $qsession --live)" \
+      --bind "ctrl-s:execute-silent(bash $qself --internal-cycle-size {3} --state $qsession)" \
+      <"$session/rows.tsv"
+  )" || status=$?
+
+  if (( status != 0 )); then
+    apply_theme "$start_theme" "$start_size" full
+    return 0
+  fi
+
+  key="$(printf '%s' "$selection" | cut -f3)"
+
+  if [[ $key == @action ]]; then
+    follow_theme_accent
+    notify "Following the theme accent again"
+    return 0
+  fi
+
+  [[ -n $key ]] || return 0
+  size="$(cat "$session/size" 2>/dev/null)"
+  apply_theme "$key" "${size:-24}" full
+  persist_theme "$key" "${size:-24}"
+  pin_theme "$key"
+  notify "$key · ${size}px · pinned"
+}
+
+# --- entry point -------------------------------------------------------------
+
+while (( $# )); do
+  case "$1" in
+    --internal-apply-key)
+      shift
+      _key="${1:-}"
+      shift || true
+      _state=""
+      _live=full
+      while (( $# )); do
+        case "$1" in
+          --state) _state="${2:-}"; shift; (( $# )) && shift ;;
+          --live) _live=live; shift ;;
+          *) shift ;;
+        esac
+      done
+      cmd_apply_key "$_key" "$_state" "$_live"
+      exit $?
+      ;;
+    --internal-cycle-size)
+      shift
+      _key="${1:-}"
+      shift || true
+      _state=""
+      while (( $# )); do
+        case "$1" in
+          --state) _state="${2:-}"; shift; (( $# )) && shift ;;
+          *) shift ;;
+        esac
+      done
+      cmd_cycle_size "$_key" "$_state"
+      exit $?
+      ;;
+    --list) cmd_list; exit $? ;;
+    --theme)
+      _theme="${2:-}"
+      shift
+      (( $# )) && shift
+      while (( $# )); do
+        case "$1" in
+          --size) _size="${2:-}"; shift; (( $# )) && shift ;;
+          --no-pin) NO_PIN=1; shift ;;
+          --dry-run) DRY_RUN=1; shift ;;
+          *) shift ;;
+        esac
+      done
+      cmd_set "$_theme" "${_size:-}"
+      exit $?
+      ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --no-pin) NO_PIN=1; shift ;;
+    --help | -h) usage; exit 0 ;;
+    "") shift ;;
+    *)
+      echo "cursor-picker: unknown option '$1'" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+cmd_run

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+# Keep the ThinkPad battery at 80% and toggle the limit on demand.
+#
+#   battery-charge-limit          toggle between 80% and 100%
+#   battery-charge-limit on       stop charging at 80%
+#   battery-charge-limit off      charge to 100%
+#   battery-charge-limit status   print the current limit
+#
+# Writing the limit needs root. The udev rule in
+# /etc/udev/rules.d/99-battery-charge-limit.rules grants group wheel write
+# access, so the toggle needs no password; pkexec is only a fallback.
+
+set -euo pipefail
+
+BAT=/sys/class/power_supply/BAT0
+ATTR="$BAT/charge_control_end_threshold"
+LIMIT=80
+FULL=100
+
+if [[ ! -e $ATTR ]]; then
+  echo "No charge threshold control at $ATTR" >&2
+  exit 1
+fi
+
+if [[ ! -w $ATTR ]] && (( EUID != 0 )); then
+  exec pkexec --user root "$0" "$@"
+fi
+
+current=$(cat "$ATTR")
+
+notify() {
+  omarchy-notification-send -g 󰂑 -u low -t 3000 "Ladegrenze" "$1" >/dev/null 2>&1 || true
+}
+
+set_limit() {
+  printf '%s\n' "$1" >"$ATTR"
+
+  if (( $1 >= FULL )); then
+    notify "Lädt wieder bis 100%"
+  else
+    notify "Ladung begrenzt auf $1%"
+  fi
+}
+
+case "${1:-toggle}" in
+  toggle)
+    if (( current <= LIMIT )); then
+      set_limit "$FULL"
+    else
+      set_limit "$LIMIT"
+    fi
+    ;;
+  on) set_limit "$LIMIT" ;;
+  off) set_limit "$FULL" ;;
+  status)
+    printf 'limit: %s%%  capacity: %s%%  %s\n' \
+      "$current" "$(cat "$BAT/capacity")" "$(cat "$BAT/status")"
+    ;;
+  *)
+    echo "Usage: battery-charge-limit [toggle|on|off|status]" >&2
+    exit 2
+    ;;
+esac

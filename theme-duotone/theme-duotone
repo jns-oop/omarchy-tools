@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+#
+# theme-duotone — turn ~/Pictures/omarchy.png into a two-colour wallpaper
+# matching the current Omarchy theme, then drop it in that theme's
+# background folder.
+#
+# Colours come from the theme's colors.toml (accent / backgrounds /
+# foreground). The image is flattened to luminance and its levels are
+# stretched so the darkest tone maps to the shadow colour and the
+# lightest to the highlight colour: a clean duotone in exactly the two
+# colours chosen.
+
+set -euo pipefail
+
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+STATE_DIR="$HOME/.local/state/omarchy/current"
+USER_BG_ROOT="$HOME/.config/omarchy/backgrounds"
+SOURCE_DEFAULT="$HOME/Pictures/omarchy.png"
+OUTPUT_NAME="omarchy.png"
+
+source_path="$SOURCE_DEFAULT"
+theme_slug=""
+dest_dir=""
+colors_arg=""
+preset_name=""
+assume_yes=false
+set_background=false
+shadow=""
+highlight=""
+
+die() { printf 'theme-duotone: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+usage() {
+  cat <<'EOF'
+theme-duotone — duotone wallpaper matching the current Omarchy theme
+
+Usage: theme-duotone [options]
+
+Options:
+  -s, --source PATH    image to recolour (default: ~/Pictures/omarchy.png)
+  -t, --theme SLUG     theme to take colours from (default: current theme)
+  -d, --dest-dir DIR   where to write the result
+                       (default: ~/.config/omarchy/backgrounds/<theme>)
+  -c, --colors A,B     shadow,highlight hex colours; skips the picker
+  -p, --preset NAME    theme-match|deep|soft|inverted|pop|mono
+      --set            also make the result the current background
+      --no-set         never set it as the current background
+  -y, --yes            non-interactive (needs --colors or --preset)
+  -h, --help           this help
+EOF
+}
+
+while (( $# )); do
+  case "$1" in
+    -s|--source)   source_path="${2:-}"; shift 2 ;;
+    -t|--theme)    theme_slug="${2:-}"; shift 2 ;;
+    -d|--dest-dir) dest_dir="${2:-}"; shift 2 ;;
+    -c|--colors)   colors_arg="${2:-}"; shift 2 ;;
+    -p|--preset)   preset_name="${2:-}"; shift 2 ;;
+    --set)         set_background=true; shift ;;
+    --no-set)      set_background=false; assume_yes=true; shift ;;
+    -y|--yes)      assume_yes=true; shift ;;
+    -h|--help)     usage; exit 0 ;;
+    *)             die "unknown option: $1 (try --help)" ;;
+  esac
+done
+
+have magick || die "missing dependency: magick (imagemagick)"
+if ! $assume_yes && ! have gum; then
+  die "gum is required for the interactive UI (or pass -y -c shadow,highlight)"
+fi
+
+# ---------------------------------------------------------------- theme ----
+
+current_slug="$(cat "$STATE_DIR/theme.name" 2>/dev/null || true)"
+[[ -n $theme_slug ]] || theme_slug="$current_slug"
+[[ -n $theme_slug ]] || die "no theme active; run: omarchy theme set <name>"
+
+theme_dir=""
+if [[ $theme_slug == "$current_slug" && -f "$STATE_DIR/theme/colors.toml" ]]; then
+  theme_dir="$STATE_DIR/theme"
+elif have omarchy-theme-dir; then
+  theme_dir="$(omarchy-theme-dir "$theme_slug" 2>/dev/null || true)"
+  [[ -n $theme_dir && -f $theme_dir/colors.toml ]] || theme_dir="$OMARCHY_PATH/themes/$theme_slug"
+else
+  theme_dir="$OMARCHY_PATH/themes/$theme_slug"
+fi
+[[ -f $theme_dir/colors.toml ]] || die "no colors.toml for theme '$theme_slug'"
+
+declare -A C=()
+while IFS= read -r line; do
+  if [[ $line =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*\"(#[0-9A-Fa-f]{6})\" ]]; then
+    C["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+  fi
+done < "$theme_dir/colors.toml"
+
+col() { printf '%s' "${C[$1]:-}"; }
+
+# First colour that actually exists in this theme. Themes vary a lot: some
+# only ship accent/background/foreground plus color0..color15.
+pick() {
+  local k
+  for k in "$@"; do
+    if [[ -n ${C[$k]:-} ]]; then
+      printf '%s' "${C[$k]}"
+      return 0
+    fi
+  done
+  return 1
+}
+theme_pretty="$(have omarchy-theme-current && omarchy-theme-current 2>/dev/null || echo "$theme_slug")"
+[[ -n $dest_dir ]] || dest_dir="$USER_BG_ROOT/$theme_slug"
+
+# --------------------------------------------------------------- source ----
+
+[[ -f $source_path ]] || die "source image not found: $source_path"
+dims="$(magick identify -format '%wx%h' "$source_path" 2>/dev/null || echo '?')"
+
+# -------------------------------------------------------------- palette ----
+
+# label<TAB>shadow<TAB>highlight
+preset_rows() {
+  local rows=(
+    "Theme match" "$(pick background color0)"                            "$(pick accent color4 color3 foreground)"
+    "Deep"        "$(pick dark_background darker_background background color0)" "$(pick accent color4 color3 foreground)"
+    "Soft"        "$(pick background color0)"                            "$(pick foreground color7 color15)"
+    "Inverted"    "$(pick accent color4 color3 foreground)"               "$(pick background color0)"
+    "Pop"         "$(pick dark_background background color0)"             "$(pick bright_foreground foreground color15)"
+    "Mono"        "$(pick darker_background background color0)"           "$(pick light_foreground foreground color7)"
+  )
+  printf '%s\t%s\t%s\n' "${rows[@]}"
+}
+
+preset_colors() {
+  local want="${1,,}" label s h
+  want="${want//-/ }"
+  while IFS=$'\t' read -r label s h; do
+    if [[ ${label,,} == "$want" ]]; then
+      printf '%s,%s' "$s" "$h"
+      return 0
+    fi
+  done < <(preset_rows)
+  return 1
+}
+
+# Truecolor when the terminal advertises it, otherwise the nearest
+# xterm-256 colour, so a swatch is visible either way.
+truecolor() {
+  [[ ${COLORTERM:-} == *truecolor* || ${COLORTERM:-} == *24bit* ]]
+}
+
+# 8-cell solid block in the given colour.
+swatch() {
+  local hex="$1" r g b
+  if [[ ! $hex =~ ^#[0-9A-Fa-f]{6}$ ]]; then
+    printf '        '
+    return
+  fi
+  r=$((16#${hex:1:2})); g=$((16#${hex:3:2})); b=$((16#${hex:5:2}))
+  if truecolor; then
+    printf '\033[48;2;%d;%d;%dm        \033[0m' "$r" "$g" "$b"
+  else
+    printf '\033[48;5;%dm        \033[0m' \
+      "$((16 + 36 * ((r + 25) / 51) + 6 * ((g + 25) / 51) + (b + 25) / 51))"
+  fi
+}
+
+# Ramp from shadow to highlight: what the recoloured wallpaper looks like.
+ramp() {
+  local a="$1" b="$2" n="${3:-24}" i r g bl
+  if [[ ! $a =~ ^#[0-9A-Fa-f]{6}$ || ! $b =~ ^#[0-9A-Fa-f]{6}$ ]]; then
+    printf '%*s' "$n" ''
+    return
+  fi
+  local ar=$((16#${a:1:2})) ag=$((16#${a:3:2})) ab=$((16#${a:5:2}))
+  local br=$((16#${b:1:2})) bg=$((16#${b:3:2})) bb=$((16#${b:5:2}))
+  for (( i = 0; i < n; i++ )); do
+    r=$(( ar + (br - ar) * i / (n - 1) ))
+    g=$(( ag + (bg - ag) * i / (n - 1) ))
+    bl=$(( ab + (bb - ab) * i / (n - 1) ))
+    if truecolor; then
+      printf '\033[48;2;%d;%d;%dm \033[0m' "$r" "$g" "$bl"
+    else
+      printf '\033[48;5;%dm \033[0m' \
+        "$((16 + 36 * ((r + 25) / 51) + 6 * ((g + 25) / 51) + (bl + 25) / 51))"
+    fi
+  done
+}
+
+# Dim colour used for secondary chrome.
+dim() {
+  local c
+  c="$(col muted)"
+  [[ -n $c ]] || c="$(col dark_foreground)"
+  [[ -n $c ]] || c="240"
+  printf '%s' "$c"
+}
+
+# Footer strip listing the keys that work on the widget below it.
+footer() {
+  gum style --foreground "$(dim)" --padding '0 1' "$*"
+}
+
+preset_menu() {
+  local label s h
+  while IFS=$'\t' read -r label s h; do
+    [[ -n $s && -n $h ]] || continue
+    printf '%s %s  %-12s %s → %s\n' "$(swatch "$s")" "$(swatch "$h")" "$label" "$s" "$h"
+  done < <(preset_rows)
+  printf '        %-12s pick any two from the palette\n' "Custom…"
+}
+
+palette_menu() {
+  local key hex label
+  declare -A seen=()
+  for key in accent selection background dark_background darker_background \
+             lighter_background foreground light_foreground bright_foreground muted \
+             red orange yellow green cyan blue magenta brown \
+             bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta \
+             color0 color1 color2 color3 color4 color5 color6 color7 \
+             color8 color9 color10 color11 color12 color13 color14 color15; do
+    [[ -n ${C[$key]:-} ]] || continue
+    hex="${C[$key]}"
+    [[ -n ${seen[$hex]:-} ]] && continue
+    seen[$hex]=1
+    label="${key//_/ }"
+    printf '%s %-18s %s\n' "$(swatch "$hex")" "$label" "$hex"
+  done
+}
+
+parse_two_colors() {
+  local spec="$1"
+  [[ $spec == *,* ]] || die "--colors wants shadow,highlight (e.g. -c '#151021,#b45cff')"
+  shadow="${spec%%,*}"
+  highlight="${spec#*,}"
+  [[ $shadow =~ ^#[0-9A-Fa-f]{6}$ ]] || die "not a hex colour: $shadow"
+  [[ $highlight =~ ^#[0-9A-Fa-f]{6}$ ]] || die "not a hex colour: $highlight"
+}
+
+# ------------------------------------------------------------- rendering ---
+
+render() {
+  local src="$1" dst="$2" a="$3" b="$4" tmp
+  mkdir -p "$(dirname -- "$dst")"
+  tmp="$(mktemp --suffix=.png)"
+  if ! magick "$src" \
+        -colorspace gray \
+        -auto-level \
+        \( -size 1x256 "gradient:${a}-${b}" \) \
+        -clut \
+        -strip \
+        -define png:color-type=2 \
+        "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    die "ImageMagick failed to render $src"
+  fi
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$dst"
+}
+
+if [[ -n $colors_arg ]]; then
+  parse_two_colors "$colors_arg"
+elif [[ -n $preset_name ]]; then
+  pair="$(preset_colors "$preset_name")" || die "unknown preset '$preset_name' (see --help)"
+  parse_two_colors "$pair"
+elif $assume_yes; then
+  die "-y needs --colors or --preset"
+else
+  gum style --border rounded --border-foreground "$(col accent)" --padding '0 1' \
+    "theme-duotone" \
+    "theme      ${theme_pretty} (${theme_slug})" \
+    "accent     $(swatch "$(col accent)") $(col accent)" \
+    "background $(swatch "$(col background)") $(col background)" \
+    "source     ${source_path}  ${dims}" \
+    "output     ${dest_dir}/${OUTPUT_NAME}"
+  footer "↑/↓ move · / search · enter select · esc cancel"
+
+  choice="$(preset_menu | gum choose --height 8 --show-help \
+    --cursor.foreground "$(col accent)" \
+    --header 'Two colours: shadow → highlight')" || exit 130
+  pair_hex="$(grep -o '#[0-9A-Fa-f]\{6\} → #[0-9A-Fa-f]\{6\}' <<<"$choice" || true)"
+
+  if [[ -n $pair_hex ]]; then
+    shadow="${pair_hex%% → *}"
+    highlight="${pair_hex##* → }"
+  else
+    footer "type to filter · ↑/↓ move · enter select · esc cancel"
+    s="$(palette_menu | gum filter --height 12 --show-help \
+      --indicator.foreground "$(col accent)" \
+      --header 'Shadow colour')" || exit 130
+    h="$(palette_menu | gum filter --height 12 --show-help \
+      --indicator.foreground "$(col accent)" \
+      --header 'Highlight colour')" || exit 130
+    shadow="$(grep -o '#[0-9A-Fa-f]\{6\}' <<<"$s" | tail -1)"
+    highlight="$(grep -o '#[0-9A-Fa-f]\{6\}' <<<"$h" | tail -1)"
+  fi
+fi
+
+[[ -n $shadow && -n $highlight ]] || die "could not determine the two colours"
+[[ ${shadow,,} != "${highlight,,}" ]] || die "shadow and highlight are the same colour"
+
+out_path="$dest_dir/$OUTPUT_NAME"
+
+# Overwriting the wallpaper that is already on screen changes the bytes but
+# not the path, and the shell ignores set() for the path it is already
+# showing. Note it now so a re-render can force a reload afterwards.
+active_before="$(readlink -f "$STATE_DIR/background" 2>/dev/null || true)"
+
+mkdir -p "$dest_dir"
+if ! $assume_yes && have gum; then
+  export -f render die
+  gum spin --spinner dot --title "recolouring ${dims}" -- \
+    bash -c 'render "$@"' _ "$source_path" "$out_path" "$shadow" "$highlight" \
+    || die "ImageMagick failed to render $source_path"
+else
+  render "$source_path" "$out_path" "$shadow" "$highlight"
+fi
+
+unique="$(magick identify -format '%k' "$out_path" 2>/dev/null || echo '?')"
+size="$(du -h "$out_path" | cut -f1)"
+
+if ! $assume_yes && have gum; then
+  gum style --border normal --border-foreground "$(col accent)" --padding '0 1' \
+    " paper     $(ramp "$shadow" "$highlight" 28)" \
+    " shadow    $(swatch "$shadow") ${shadow}" \
+    " highlight $(swatch "$highlight") ${highlight}" \
+    " output    ${out_path}" \
+    " ${unique} colours · ${size}"
+fi
+printf 'theme-duotone: wrote %s (%s colours, %s)\n' "$out_path" "$unique" "$size"
+
+# Let the background switcher pick the new file up.
+have omarchy-theme-bg-cache && omarchy-theme-bg-cache >/dev/null 2>&1 || true
+
+if ! $assume_yes; then
+  footer "y/n or ←/→ choose · enter confirm · esc cancel"
+  if gum confirm --default=true --show-help "Set it as the current background?"; then
+    set_background=true
+  fi
+fi
+
+if $set_background; then
+  have omarchy-theme-bg-set || die "omarchy-theme-bg-set not found"
+  omarchy-theme-bg-set "$out_path"
+  printf 'theme-duotone: background set\n'
+fi
+
+# A set() for the path the shell already displays is dropped, so a wallpaper
+# regenerated in place (theme match, then inverted, say) would keep showing
+# the old pixels. An instant set is the one call that forces a reload.
+if [[ -n $active_before && $active_before == "$out_path" ]]; then
+  if have omarchy-shell; then
+    omarchy-shell -q background setInstant "$out_path"
+    printf 'theme-duotone: live background refreshed\n'
+  fi
+fi
