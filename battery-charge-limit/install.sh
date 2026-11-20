@@ -21,7 +21,7 @@ Usage: install.sh [--bin-dir DIR] [--no-udev]
   --bin-dir DIR   where to install the script (default: ~/.local/bin)
   --no-udev       install the script only, skip the udev rule
 
-Hardcoded for this ThinkPad: BAT0, group wheel and the 80% limit. On another
+Hardcoded for my ThinkPad T14: BAT0, group wheel and the 80% limit. On another
 laptop, change those values here first, in battery-charge-limit and in the rule.
 EOF
 }

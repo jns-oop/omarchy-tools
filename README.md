@@ -4,8 +4,8 @@ Small, dependency-light tools for [Omarchy](https://omarchy.org). Each one is a
 single executable script with its own `install.sh`, so any Omarchy machine can be
 set up the same way in a few commands. `theme-duotone` and `cursor-picker` are
 portable — paths come from `XDG_*`/`$HOME` and the cursor themes are fetched at
-install time — while `battery-charge-limit` is deliberately wired to this
-ThinkPad's `BAT0` and the `wheel` group.
+install time — while `battery-charge-limit` is deliberately wired to my
+ThinkPad T14's `BAT0` and the `wheel` group.
 
 ## Personal use, no support
 
@@ -20,7 +20,7 @@ may go unanswered.
 | --- | --- |
 | [theme-duotone](theme-duotone/) | Recolours `~/Pictures/omarchy.png` in two colours from the current theme and drops it in that theme's background folder. |
 | [cursor-picker](cursor-picker/) | TUI to browse, preview, apply and pin an installed cursor theme. |
-| [battery-charge-limit](battery-charge-limit/) | Toggles this ThinkPad's battery charge threshold between 80% and 100%, password-free via udev. |
+| [battery-charge-limit](battery-charge-limit/) | Toggles my ThinkPad T14's battery charge threshold between 80% and 100%, password-free via udev. |
 
 ## Requirements
 
@@ -49,7 +49,7 @@ sudo pacman -S --needed imagemagick gum fzf jq python3
 ./theme-duotone/install.sh          # also restores ~/Pictures/omarchy.png
 ./cursor-picker/install.sh
 ./cursor-picker/bibata/install.sh   # 56 cursor themes + accent matching, ~170 MB
-./battery-charge-limit/install.sh   # this ThinkPad only: adds a udev rule (sudo)
+./battery-charge-limit/install.sh   # my ThinkPad T14 only: adds a udev rule (sudo)
 ```
 
 Only want one? Run that directory's `install.sh`: it checks the tool's
