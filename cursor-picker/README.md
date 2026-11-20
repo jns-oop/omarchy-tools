@@ -15,11 +15,39 @@ picker — **Follow theme accent** — removes that pin again.
 ./install.sh                 # -> ~/.local/bin/cursor-picker
 ```
 
-Requires `fzf`:
+## Requirements
 
-```sh
-sudo pacman -S --needed fzf
-```
+- `fzf` for the picker itself:
+
+  ```sh
+  sudo pacman -S --needed fzf
+  ```
+
+- A cursor theme to pick from. This setup uses
+  [bibata-material-cursors](https://github.com/SakibShahariar/material-bibata-cursor)
+  — the `Bibata-Material-*` families (dark and light) built from
+  [Bibata_Cursor](https://github.com/ful1e5/Bibata_Cursor) — installed **per
+  user** from its GitHub releases. They go to `~/.local/share/icons`, not
+  `/usr/share/icons`: libhyprcursor only scans the user icon dir, and
+  `XCURSOR_PATH` already covers it.
+
+  ```sh
+  cd /tmp
+  v=1.5.0
+  base=https://github.com/SakibShahariar/material-bibata-cursor/releases/download/v$v
+  curl -LO "$base/bibata-material-dark-v$v.tar.gz"
+  curl -LO "$base/bibata-material-light-v$v.tar.gz"
+  tar xzf "bibata-material-dark-v$v.tar.gz"
+  tar xzf "bibata-material-light-v$v.tar.gz"
+  mkdir -p ~/.local/share/icons
+  mv "bibata-material-dark-v$v"/Bibata-Material-* ~/.local/share/icons/
+  mv "bibata-material-light-v$v"/Bibata-Material-* ~/.local/share/icons/
+  ```
+
+  Any theme on `XCURSOR_PATH` works with the picker, but the
+  `manual-lock` pin path and the optional `colors.tsv` swatches are built
+  around Bibata Material. The full control-plane from upstream (theme-set
+  hook, login re-apply, bitmap trimming, swatches) is not part of this repo.
 
 `hyprctl`, `gsettings` and `dbus-update-activation-environment` are used when
 present; without them the picker still persists the choice for next login.
