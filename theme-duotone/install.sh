@@ -43,6 +43,14 @@ fi
 
 install -Dm755 "$here/$script" "$bin_dir/$script"
 
+# The default --source points at ~/Pictures/omarchy.png. Restore the reference
+# image only when it is missing, so a reinstall never overwrites your own.
+pictures="${XDG_PICTURES_DIR:-$HOME/Pictures}"
+if [[ ! -e $pictures/omarchy.png ]]; then
+  install -Dm644 "$here/omarchy.png" "$pictures/omarchy.png"
+  printf 'installed %s\n' "$pictures/omarchy.png"
+fi
+
 printf 'installed %s\n' "$bin_dir/$script"
 cat <<EOF
 

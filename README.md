@@ -2,9 +2,10 @@
 
 Small, dependency-light tools for [Omarchy](https://omarchy.org). Each one is a
 single executable script with its own `install.sh`, so any Omarchy machine can be
-set up the same way in a few commands. Nothing here is tied to a particular
-hostname, username, battery or theme: paths come from `XDG_*`/`$HOME` and the
-hardware parts are detected at install time.
+set up the same way in a few commands. `theme-duotone` and `cursor-picker` are
+portable — paths come from `XDG_*`/`$HOME` and the cursor themes are fetched at
+install time — while `battery-charge-limit` is deliberately wired to this
+ThinkPad's `BAT0` and the `wheel` group.
 
 ## Personal use, no support
 
@@ -19,7 +20,7 @@ may go unanswered.
 | --- | --- |
 | [theme-duotone](theme-duotone/) | Recolours `~/Pictures/omarchy.png` in two colours from the current theme and drops it in that theme's background folder. |
 | [cursor-picker](cursor-picker/) | TUI to browse, preview, apply and pin an installed cursor theme. |
-| [battery-charge-limit](battery-charge-limit/) | Toggles a laptop's battery charge threshold between 80% and 100%, password-free via udev. |
+| [battery-charge-limit](battery-charge-limit/) | Toggles this ThinkPad's battery charge threshold between 80% and 100%, password-free via udev. |
 
 ## Requirements
 
@@ -30,13 +31,12 @@ base install:
 | --- | --- |
 | `imagemagick`, `gum` | theme-duotone |
 | `fzf` | cursor-picker |
-| `bibata-material-cursors` | cursor-picker's accent-matched setup — `cursor-picker/bibata/install.sh` fetches it |
+| Material Bibata themes | cursor-picker's accent-matched setup; `cursor-picker/bibata/install.sh` downloads them |
 | `curl`, `jq`, `python3` | that Bibata installer only |
 
-battery-charge-limit additionally needs a battery that exposes
-`charge_control_end_threshold` under `/sys/class/power_supply` (detected, not
-assumed); without one its installer still installs the script and skips the
-udev rule.
+battery-charge-limit is written for this machine: it expects `BAT0` under
+`/sys/class/power_supply` with a `charge_control_end_threshold` attribute, a
+`wheel` group, and root for the udev rule. On another laptop it needs editing.
 
 ## Install
 
@@ -44,17 +44,21 @@ udev rule.
 git clone <this repository's URL> omarchy-tools
 cd omarchy-tools
 
-sudo pacman -S --needed imagemagick gum fzf
-./theme-duotone/install.sh
+sudo pacman -S --needed imagemagick gum fzf jq python3
+
+./theme-duotone/install.sh          # also restores ~/Pictures/omarchy.png
 ./cursor-picker/install.sh
-./battery-charge-limit/install.sh
+./cursor-picker/bibata/install.sh   # 56 cursor themes + accent matching, ~170 MB
+./battery-charge-limit/install.sh   # this ThinkPad only: adds a udev rule (sudo)
 ```
 
 Only want one? Run that directory's `install.sh`: it checks the tool's
 dependencies, copies it to `~/.local/bin`, and prints the matching keybinding.
-All three are idempotent, accept `--bin-dir DIR`, and write nothing outside
-your home except the battery udev rule in `/etc/udev/rules.d` (skippable with
-`--no-udev`, and printable without changing anything with `--dry-run`).
+All of them are idempotent and accept `--bin-dir DIR`. The cursor setup is two
+steps — `cursor-picker/install.sh` installs only the picker, `bibata/install.sh`
+adds the themes, the swatch table, the theme-set hook and the login re-apply.
+Nothing writes outside your home except the battery udev rule in
+`/etc/udev/rules.d`, which the battery installer skips with `--no-udev`.
 
 ## Keybindings
 
@@ -77,11 +81,11 @@ same three lines in `bind = SUPER ALT, D, exec, omarchy-launch-tui ...` form.
 
 ```
 theme-duotone/         theme-duotone      install.sh   README.md
-                       omarchy.png        (reference source image)
+                       omarchy.png        (reference source, to ~/Pictures)
 cursor-picker/         cursor-picker      install.sh   README.md
                        bibata/            accent-matched cursor setup
 battery-charge-limit/   battery-charge-limit
-                      99-battery-charge-limit.rules.in   (udev template)
+                      99-battery-charge-limit.rules
                        install.sh         README.md
 ```
 

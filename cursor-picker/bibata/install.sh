@@ -22,9 +22,12 @@ here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 VERSION=1.5.0
 BASE="https://github.com/SakibShahariar/material-bibata-cursor/releases/download/v${VERSION}"
-THEMES_JSON="https://raw.githubusercontent.com/SakibShahariar/material-bibata-cursor/master/themes.json"
+THEMES_JSON="https://raw.githubusercontent.com/SakibShahariar/material-bibata-cursor/v${VERSION}/themes.json"
 DARK_SHA=8a0cfddd60787c65a078ce494b5708c1d68f3e576118fde0701949edb40cba04
 LIGHT_SHA=db8e41025be52abd211de6485cb12b411058f7de811216bc0f495c7b04a1364b
+# themes.json comes from the same tag as the archives, never master: master can
+# list a family the pinned release does not contain.
+THEMES_SHA=b40792ce4926b5835ce719199e4e7eba54711ba6382782d304d8f00d517c5a84
 
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/bibata-cursor"
 ICONS="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
@@ -78,6 +81,7 @@ else
   echo "==> Verifying release checksums"
   printf '%s  %s\n' "$DARK_SHA" "$WORK/dark.tar.gz" | sha256sum -c --quiet -
   printf '%s  %s\n' "$LIGHT_SHA" "$WORK/light.tar.gz" | sha256sum -c --quiet -
+  printf '%s  %s\n' "$THEMES_SHA" "$WORK/themes.json" | sha256sum -c --quiet -
 
   # The family list comes from upstream themes.json, so a release that adds or
   # renames families needs no edit here. Classic is the one family left out: it

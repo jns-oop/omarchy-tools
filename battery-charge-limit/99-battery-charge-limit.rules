@@ -1,0 +1,3 @@
+# Keep the ThinkPad battery at 80% at boot and let group wheel change the
+# limit without a password:  battery-charge-limit [toggle|on|off|status]
+SUBSYSTEM=="power_supply", KERNEL=="BAT0", ACTION=="add", ATTR{charge_control_end_threshold}="80", RUN+="/usr/bin/chgrp wheel /sys/class/power_supply/BAT0/charge_control_end_threshold", RUN+="/usr/bin/chmod 0664 /sys/class/power_supply/BAT0/charge_control_end_threshold"
