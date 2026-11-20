@@ -10,27 +10,23 @@ Omarchy install can be brought back to this setup in a few commands.
 | [cursor-picker](cursor-picker/) | TUI to browse, preview, apply and pin an installed cursor theme. |
 | [battery-charge-limit](battery-charge-limit/) | Toggles a ThinkPad charge threshold between 80% and 100%, password-free via udev. |
 
-## Requirements
-
-Omarchy 4.x on Arch (the scripts use `omarchy-*` helpers and `pacman`), plus
-`bash` and `coreutils`. Per-tool extras are listed in each README:
-`imagemagick` + `gum`, `fzf`, and nothing extra respectively.
-
 ## Install
-
-Clone once, then run the installer for the tools you want. The installers are
-idempotent, take `--bin-dir DIR` (default `~/.local/bin`), and never write
-outside your home directory except the battery udev rule in
-`/etc/udev/rules.d`.
 
 ```sh
 git clone https://github.com/jns-oop/omarchy-tools.git
 cd omarchy-tools
 
+sudo pacman -S --needed imagemagick gum fzf
 ./theme-duotone/install.sh
 ./cursor-picker/install.sh
 ./battery-charge-limit/install.sh
 ```
+
+Needs Omarchy 4.x on Arch, since the tools call the `omarchy-*` helpers. Only
+want one? Run that directory's `install.sh`: it checks the tool's
+dependencies, copies it to `~/.local/bin`, and prints the matching keybinding.
+All three are idempotent, accept `--bin-dir DIR`, and write nothing outside
+your home except the battery udev rule in `/etc/udev/rules.d`.
 
 ## Keybindings
 
